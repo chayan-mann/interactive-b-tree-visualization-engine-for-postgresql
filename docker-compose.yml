@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: indexlab-postgres
+    environment:
+      POSTGRES_DB: indexlab
+      POSTGRES_USER: indexlab
+      POSTGRES_PASSWORD: indexlab
+    ports:
+      - "5433:5432"
+    volumes:
+      - indexlab_pgdata:/var/lib/postgresql/data
+      - ./scripts/01-pageinspect.sql:/docker-entrypoint-initdb.d/01-pageinspect.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indexlab -d indexlab"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build: .
+    container_name: indexlab-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      INDEXLAB_DSN: "postgres://indexlab:indexlab@postgres:5432/indexlab?sslmode=disable"
+    ports:
+      - "8080:8080"
+
+volumes:
+  indexlab_pgdata:
