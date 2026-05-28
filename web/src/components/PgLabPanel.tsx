@@ -54,6 +54,7 @@ export function PgLabPanel() {
       const s = await pgApi.status();
       setStatus(s);
       setAvailable(true);
+      setError(null);
     } catch (e) {
       setAvailable(false);
       setError(String(e));
@@ -72,6 +73,7 @@ export function PgLabPanel() {
           The PostgreSQL lab is not configured. Set <code>INDEXLAB_DSN</code> (or pass
           <code> -dsn</code> to the server) and restart. Example:
         </p>
+        {error ? <p className="muted" style={{ fontSize: 12 }}>Error: {error}</p> : null}
         <pre className="code" style={{ background: '#1d2230', padding: 8, borderRadius: 6 }}>
 INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disable" \
   go run ./cmd/server

@@ -11,12 +11,26 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `${res.status} ${res.statusText}`);
-  }
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+
+  const bodyText = await res.text();
+  if (!res.ok) {
+    const msg = bodyText.trim() || `${res.status} ${res.statusText}`;
+    throw new Error(msg);
+  }
+
+  const contentType = res.headers.get('content-type')?.toLowerCase() ?? '';
+  const looksHtml = bodyText.trimStart().startsWith('<!doctype') || contentType.includes('text/html');
+  if (looksHtml) {
+    throw new Error(`unexpected HTML response from ${path}`);
+  }
+
+  try {
+    return JSON.parse(bodyText) as T;
+  } catch (error) {
+    const preview = bodyText.slice(0, 180).replace(/\s+/g, ' ');
+    throw new Error(`invalid JSON from ${path}: ${(error as Error).message}. Body: ${preview}`);
+  }
 }
 
 export const bptreeApi = {

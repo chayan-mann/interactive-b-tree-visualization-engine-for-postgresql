@@ -1,11 +1,37 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BPTreePanel } from './components/BPTreePanel';
 import { PgLabPanel } from './components/PgLabPanel';
 
 type Tab = 'tree' | 'pg';
+const TAB_STORAGE_KEY = 'indexlab-active-tab';
+
+function isTab(v: string | null): v is Tab {
+  return v === 'tree' || v === 'pg';
+}
+
+function readInitialTab(): Tab {
+  const params = new URLSearchParams(window.location.search);
+  const queryTab = params.get('tab');
+  if (isTab(queryTab)) {
+    return queryTab;
+  }
+  const savedTab = window.localStorage.getItem(TAB_STORAGE_KEY);
+  if (isTab(savedTab)) {
+    return savedTab;
+  }
+  return 'tree';
+}
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('tree');
+  const [tab, setTab] = useState<Tab>(readInitialTab);
+
+  useEffect(() => {
+    window.localStorage.setItem(TAB_STORAGE_KEY, tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tab);
+    window.history.replaceState({}, '', url.toString());
+  }, [tab]);
+
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px' }}>
       <header
