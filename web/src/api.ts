@@ -6,6 +6,13 @@ import type {
   Snapshot,
 } from './types';
 
+interface ApiErrorPayload {
+  error: string;
+  code?: string;
+  reason?: string;
+  action?: string;
+}
+
 async function send<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -15,6 +22,23 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
 
   const bodyText = await res.text();
   if (!res.ok) {
+    const contentType = res.headers.get('content-type')?.toLowerCase() ?? '';
+    const looksJSON = contentType.includes('application/json') || bodyText.trimStart().startsWith('{');
+    if (looksJSON) {
+      try {
+        const payload = JSON.parse(bodyText) as ApiErrorPayload;
+        const reason = payload.reason || payload.error || `${res.status} ${res.statusText}`;
+        const err = new Error(reason) as Error & { status?: number; code?: string; action?: string };
+        err.status = res.status;
+        err.code = payload.code;
+        err.action = payload.action;
+        throw err;
+      } catch (error) {
+        if (error instanceof Error && !(error instanceof SyntaxError)) {
+          throw error;
+        }
+      }
+    }
     const msg = bodyText.trim() || `${res.status} ${res.statusText}`;
     throw new Error(msg);
   }
@@ -73,8 +97,13 @@ export const bptreeApi = {
 };
 
 export interface PgStatus {
-  rows: number;
-  indexes: IndexInfo[];
+  configured?: boolean;
+  connected?: boolean;
+  ready?: boolean;
+  reason?: string;
+  nextAction?: string;
+  rows?: number;
+  indexes?: IndexInfo[];
 }
 
 export interface PgQueryResult {

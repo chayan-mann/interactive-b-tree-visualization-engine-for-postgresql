@@ -36,8 +36,29 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { name: '', columns: '', include: '', unique: false };
 
+type LabState = 'loading' | 'not-configured' | 'needs-setup' | 'ready';
+
+function inferLabState(status: PgStatus | null): LabState {
+  if (!status) {
+    return 'loading';
+  }
+  if (status.configured === false || status.connected === false) {
+    return 'not-configured';
+  }
+  if (status.ready === false) {
+    return 'needs-setup';
+  }
+  return 'ready';
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function PgLabPanel() {
-  const [available, setAvailable] = useState<boolean | null>(null);
   const [status, setStatus] = useState<PgStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,37 +72,18 @@ export function PgLabPanel() {
 
   const refreshStatus = useCallback(async () => {
     try {
+      setError(null);
       const s = await pgApi.status();
       setStatus(s);
-      setAvailable(true);
-      setError(null);
     } catch (e) {
-      setAvailable(false);
       setError(String(e));
+      setStatus(null);
     }
   }, []);
 
   useEffect(() => {
     refreshStatus();
   }, [refreshStatus]);
-
-  if (available === false) {
-    return (
-      <div className="panel">
-        <div className="panel-title">PostgreSQL lab</div>
-        <p>
-          The PostgreSQL lab is not configured. Set <code>INDEXLAB_DSN</code> (or pass
-          <code> -dsn</code> to the server) and restart. Example:
-        </p>
-        {error ? <p className="muted" style={{ fontSize: 12 }}>Error: {error}</p> : null}
-        <pre className="code" style={{ background: '#1d2230', padding: 8, borderRadius: 6 }}>
-INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disable" \
-  go run ./cmd/server
-        </pre>
-        <button onClick={refreshStatus}>Retry connection</button>
-      </div>
-    );
-  }
 
   const run = async <T,>(label: string, fn: () => Promise<T>, after?: (v: T) => void) => {
     setBusy(true);
@@ -98,13 +100,20 @@ INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disab
     }
   };
 
-  const onSetup = () => run('setup', pgApi.setup, () => refreshStatus());
+  const derivedState = status ? inferLabState(status) : error ? 'not-configured' : 'loading';
+  const indexes = status?.indexes ?? [];
+  const rowCount = status?.rows ?? 0;
+
+  const onSetup = () =>
+    run('setup', () => pgApi.setup(), () => refreshStatus());
+
   const onSeed = () =>
     run(
       'seed',
       () => pgApi.seed(Number(seedRows) || 100000, true),
       () => refreshStatus(),
     );
+
   const onQuery = () => run('query', () => pgApi.query(sql), setQueryResult);
   const onExplain = () => run('explain', () => pgApi.explain(sql), setExplain);
   const onRecommend = () =>
@@ -155,13 +164,58 @@ INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disab
     });
   };
 
+  if (derivedState === 'not-configured') {
+    return (
+      <div className="panel">
+        <div className="panel-title">PostgreSQL lab</div>
+        <p>
+          PostgreSQL lab is not configured or not reachable. Set <code>INDEXLAB_DSN</code> (or pass
+          <code> -dsn</code> to the server) and restart.
+        </p>
+        {status?.reason ? <p className="muted" style={{ fontSize: 12 }}>Reason: {status.reason}</p> : null}
+        {error ? <p className="muted" style={{ fontSize: 12, color: '#f06e6e' }}>Error: {error}</p> : null}
+        <pre className="code" style={{ background: '#1d2230', padding: 8, borderRadius: 6 }}>
+INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disable" \
+  go run ./cmd/server
+        </pre>
+        <button onClick={refreshStatus} disabled={busy}>Retry connection</button>
+      </div>
+    );
+  }
+
+  if (derivedState === 'loading') {
+    return (
+      <div className="panel">
+        <div className="panel-title">PostgreSQL lab</div>
+        <p>Loading PostgreSQL lab status…</p>
+        <button onClick={refreshStatus} disabled={busy}>Refresh</button>
+      </div>
+    );
+  }
+
+  if (derivedState === 'needs-setup') {
+    return (
+      <div className="panel">
+        <div className="panel-title">PostgreSQL lab</div>
+        <p>The PostgreSQL connection is ready, but <code>users_demo</code> is missing.</p>
+        <p className="muted" style={{ fontSize: 12 }}>
+          {status?.reason ?? 'Run setup to create the demo table, then seed rows and index studies.'}
+        </p>
+        <div className="row" style={{ gap: 10, marginTop: 10 }}>
+          <button onClick={onSetup} disabled={busy}>Create table</button>
+          <button onClick={refreshStatus} disabled={busy}>Refresh status</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="col" style={{ gap: 16 }}>
       <div className="panel">
         <div className="panel-title row" style={{ justifyContent: 'space-between' }}>
           <span>PostgreSQL lab</span>
           <span className="muted" style={{ fontSize: 11, textTransform: 'none' }}>
-            {status ? `${status.rows.toLocaleString()} rows · ${status.indexes.length} indexes` : 'loading…'}
+            {`${rowCount.toLocaleString()} rows · ${indexes.length} indexes`}
           </span>
         </div>
         <div className="row" style={{ gap: 10 }}>
@@ -178,7 +232,7 @@ INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disab
           </div>
           <button onClick={refreshStatus} disabled={busy}>Refresh status</button>
         </div>
-        {status && status.indexes.length ? (
+        {indexes.length ? (
           <div style={{ marginTop: 12 }}>
             <div className="panel-title">Current indexes</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -191,7 +245,7 @@ INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disab
                 </tr>
               </thead>
               <tbody>
-                {status.indexes.map((i) => (
+                {indexes.map((i) => (
                   <tr key={i.name} style={{ borderTop: '1px solid #2a3142' }}>
                     <td style={{ padding: 4 }} className="code">{i.name}</td>
                     <td style={{ padding: 4 }} className="code">{i.definition}</td>
@@ -345,11 +399,4 @@ INDEXLAB_DSN="postgres://indexlab:indexlab@localhost:5432/indexlab?sslmode=disab
       ) : null}
     </div>
   );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
