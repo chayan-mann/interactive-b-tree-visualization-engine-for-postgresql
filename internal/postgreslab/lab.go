@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +21,10 @@ import (
 type Lab struct {
 	pool *pgxpool.Pool
 }
+
+// ErrReadOnlyQuery is returned when a submitted query attempts any write or
+// unsafe statement in the read-only endpoints.
+var ErrReadOnlyQuery = errors.New("only read-only queries are allowed")
 
 // New connects to the given DSN. Returns an error if the connection cannot
 // be established within a short timeout.
@@ -60,6 +65,13 @@ func (l *Lab) RowCount(ctx context.Context) (int64, error) {
 	return n, err
 }
 
+// DemoTableExists reports whether the demo table exists.
+func (l *Lab) DemoTableExists(ctx context.Context) (bool, error) {
+	var exists bool
+	err := l.pool.QueryRow(ctx, "SELECT to_regclass('public.users_demo') IS NOT NULL").Scan(&exists)
+	return exists, err
+}
+
 // Seed inserts `rows` synthetic rows using a single set-based INSERT so
 // generating a million is fast. If `truncate` is true the table is cleared
 // first.
@@ -89,11 +101,11 @@ FROM generate_series(1, $1) AS g;`
 
 // IndexSpec describes an index to create.
 type IndexSpec struct {
-	Name     string   `json:"name"`
-	Table    string   `json:"table"`
-	Columns  []string `json:"columns"`
-	Include  []string `json:"include,omitempty"`
-	Unique   bool     `json:"unique,omitempty"`
+	Name    string   `json:"name"`
+	Table   string   `json:"table"`
+	Columns []string `json:"columns"`
+	Include []string `json:"include,omitempty"`
+	Unique  bool     `json:"unique,omitempty"`
 }
 
 // CreateIndex builds and executes a CREATE INDEX statement. Identifiers are
@@ -186,10 +198,10 @@ ORDER BY i.indexname`, table)
 
 // QueryResult holds rows returned by a user-issued query.
 type QueryResult struct {
-	Columns  []string         `json:"columns"`
-	Rows     [][]interface{}  `json:"rows"`
+	Columns   []string        `json:"columns"`
+	Rows      [][]interface{} `json:"rows"`
 	Truncated bool            `json:"truncated"`
-	Duration time.Duration    `json:"durationNs"`
+	Duration  time.Duration   `json:"durationNs"`
 }
 
 // RunQuery executes an arbitrary read-only-looking SQL string. The first
@@ -267,16 +279,205 @@ func (l *Lab) AcquireConn(ctx context.Context) (*pgxpool.Conn, error) {
 	return l.pool.Acquire(ctx)
 }
 
-// guardReadOnly rejects obviously mutating SQL so the demo endpoint cannot
-// be used to wipe data.
+var readOnlyForbiddenTokens = map[string]struct{}{
+	"insert":     {},
+	"update":     {},
+	"delete":     {},
+	"drop":       {},
+	"truncate":   {},
+	"alter":      {},
+	"create":     {},
+	"grant":      {},
+	"revoke":     {},
+	"vacuum":     {},
+	"copy":       {},
+	"reload":     {},
+	"backup":     {},
+	"call":       {},
+	"listen":     {},
+	"notify":     {},
+	"execute":    {},
+	"prepare":    {},
+	"deallocate": {},
+}
+
+// guardReadOnly validates that an SQL query is read-only and does not contain
+// obvious mutating constructs outside literals and comments.
 func guardReadOnly(sql string) error {
-	trimmed := strings.ToLower(strings.TrimSpace(sql))
-	for _, bad := range []string{"insert ", "update ", "delete ", "drop ", "truncate ", "alter ", "create ", "grant ", "revoke "} {
-		if strings.HasPrefix(trimmed, bad) {
-			return fmt.Errorf("only read-only queries are allowed here; use the dedicated endpoints for %q", strings.TrimSpace(bad))
+	clean := normalizeSQLForReadOnly(sql)
+	if clean == "" {
+		return fmt.Errorf("%w: query is empty", ErrReadOnlyQuery)
+	}
+	if hasMultiStatement(clean) {
+		return fmt.Errorf("%w: multiple SQL statements are not allowed", ErrReadOnlyQuery)
+	}
+	for _, token := range splitSQLTokens(clean) {
+		if _, forbidden := readOnlyForbiddenTokens[token]; forbidden {
+			return fmt.Errorf("%w: %q is not allowed", ErrReadOnlyQuery, token)
 		}
 	}
 	return nil
+}
+
+func normalizeSQLForReadOnly(sql string) string {
+	var out strings.Builder
+	out.Grow(len(sql))
+
+	i := 0
+	for i < len(sql) {
+		ch := sql[i]
+
+		// Line comments: -- ...
+		if ch == '-' && i+1 < len(sql) && sql[i+1] == '-' {
+			i += 2
+			for i < len(sql) && sql[i] != '\n' && sql[i] != '\r' {
+				i++
+			}
+			out.WriteByte(' ')
+			continue
+		}
+
+		// Block comments: /* ... */
+		if ch == '/' && i+1 < len(sql) && sql[i+1] == '*' {
+			i += 2
+			for i+1 < len(sql) {
+				if sql[i] == '*' && sql[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+			out.WriteByte(' ')
+			continue
+		}
+
+		// Single-quoted strings.
+		if ch == '\'' {
+			i++
+			for i < len(sql) {
+				if sql[i] == '\'' {
+					if i+1 < len(sql) && sql[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+			out.WriteByte(' ')
+			continue
+		}
+
+		// Double-quoted identifiers.
+		if ch == '"' {
+			i++
+			for i < len(sql) {
+				if sql[i] == '"' {
+					if i+1 < len(sql) && sql[i+1] == '"' {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+			out.WriteByte(' ')
+			continue
+		}
+
+		// Dollar-quoted strings.
+		if ch == '$' {
+			if next := skipDollarQuote(sql, i); next > i {
+				i = next
+				out.WriteByte(' ')
+				continue
+			}
+		}
+
+		out.WriteByte(byte(unicode.ToLower(rune(ch))))
+		i++
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func skipDollarQuote(sql string, start int) int {
+	tagEnd := start + 1
+	if tagEnd >= len(sql) {
+		return start
+	}
+	if sql[tagEnd] != '$' && !isDollarTagStart(sql[tagEnd]) {
+		return start
+	}
+	if sql[tagEnd] != '$' {
+		tagEnd++
+		for tagEnd < len(sql) && isDollarTagBody(sql[tagEnd]) {
+			tagEnd++
+		}
+		if tagEnd >= len(sql) || sql[tagEnd] != '$' {
+			return start
+		}
+	}
+
+	delimiter := sql[start : tagEnd+1]
+	closing := strings.Index(sql[tagEnd+1:], delimiter)
+	if closing < 0 {
+		return start
+	}
+	return tagEnd + 1 + closing + len(delimiter)
+}
+
+func isDollarTagStart(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+func isDollarTagBody(c byte) bool {
+	return isDollarTagStart(c) || (c >= '0' && c <= '9')
+}
+
+func hasMultiStatement(sql string) bool {
+	found := false
+	for i := 0; i < len(sql); i++ {
+		if sql[i] != ';' {
+			continue
+		}
+		if !found {
+			found = true
+			continue
+		}
+		return true
+	}
+	if !found {
+		return false
+	}
+	first := strings.IndexByte(sql, ';')
+	return strings.TrimSpace(sql[first+1:]) != ""
+}
+
+func splitSQLTokens(sql string) []string {
+	var out []string
+	start := -1
+	for i, ch := range sql {
+		if isSQLToken(ch) {
+			if start == -1 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			out = append(out, sql[start:i])
+			start = -1
+		}
+	}
+	if start >= 0 {
+		out = append(out, sql[start:])
+	}
+	return out
+}
+
+func isSQLToken(ch rune) bool {
+	return ch == '_' || ch == '$' || ch == '@' || unicode.IsLetter(ch) || unicode.IsDigit(ch)
 }
 
 // validateIdent ensures an identifier is a simple snake_case ASCII token.
