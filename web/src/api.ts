@@ -31,10 +31,30 @@ export const bptreeApi = {
     send<OpResponse>('/api/bptree/search', { method: 'POST', body: JSON.stringify({ key }) }),
   range: (lo: number, hi: number) =>
     send<OpResponse>('/api/bptree/range', { method: 'POST', body: JSON.stringify({ lo, hi }) }),
-  bulk: (keys: number[], reset: boolean, order: number) =>
+  bulk: (
+    keys: number[],
+    reset: boolean,
+    order: number,
+    operations?: Array<{
+      op: string;
+      key?: number;
+      value?: string;
+      lo?: number;
+      hi?: number;
+      label?: string;
+      notes?: string;
+    }>,
+    scenarioName?: string,
+  ) =>
     send<OpResponse>('/api/bptree/bulk', {
       method: 'POST',
-      body: JSON.stringify({ keys, reset, order }),
+      body: JSON.stringify({
+        keys,
+        reset,
+        order,
+        operations,
+        scenarioName,
+      }),
     }),
 };
 

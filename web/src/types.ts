@@ -1,5 +1,9 @@
 export interface TraceEvent {
   type: string;
+  label?: string;
+  notes?: string;
+  eventPhase?: string;
+  operationId?: string;
   details?: Record<string, unknown>;
 }
 
@@ -40,8 +44,54 @@ export interface OpResponse {
   value?: string;
   found?: boolean;
   results?: KV[];
+  metrics?: BPTreeMetrics;
+  pre?: BPTreeSnapshotSummary;
+  after?: BPTreeSnapshotSummary;
+  scenarioRun?: ScenarioRun;
+  eventGroups?: ScenarioStep[];
   trace: TraceEvent[];
   snapshot: Snapshot;
+}
+
+export interface BPTreeSnapshotSummary {
+  order: number;
+  size: number;
+  height: number;
+  rootPageId: number;
+  diskReads: number;
+  diskWrites: number;
+}
+
+export interface BPTreeMetrics {
+  pathLength: number;
+  nodeReads: number;
+  nodeWrites: number;
+  eventCountsByType: Record<string, number>;
+  invariantChecksPassed: boolean;
+}
+
+export interface ScenarioStep {
+  step: number;
+  op: string;
+  label?: string;
+  notes?: string;
+  key?: number;
+  lo?: number;
+  hi?: number;
+  metrics: BPTreeMetrics;
+  eventFrom: number;
+  eventTo: number;
+  resultFound?: boolean;
+  resultCount?: number;
+  pre?: BPTreeSnapshotSummary;
+  after?: BPTreeSnapshotSummary;
+}
+
+export interface ScenarioRun {
+  name?: string;
+  totalSteps: number;
+  timestampMs: number;
+  steps: ScenarioStep[];
 }
 
 export interface IndexInfo {
