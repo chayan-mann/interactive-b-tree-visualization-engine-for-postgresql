@@ -4,6 +4,7 @@ package main
 
 import (
 	"flag"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -31,6 +32,7 @@ func main() {
 		lab, err := postgreslab.New(*dsn)
 		if err != nil {
 			log.Printf("postgres lab unavailable: %v", err)
+			registerUnavailablePostgresLab(mux, "postgresql connection failed: "+err.Error())
 		} else {
 			labAPI := api.NewPostgresLabService(lab)
 			labAPI.Register(mux)
@@ -38,6 +40,7 @@ func main() {
 		}
 	} else {
 		log.Printf("INDEXLAB_DSN not set — PostgreSQL lab disabled")
+		registerUnavailablePostgresLab(mux, "INDEXLAB_DSN not set")
 	}
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -114,4 +117,26 @@ func max0(x int) int {
 		return 0
 	}
 	return x
+}
+
+// registerUnavailablePostgresLab wires stable JSON endpoints when Postgres lab
+// is unavailable so the frontend does not receive SPA HTML fallback for /api/pglab/*.
+func registerUnavailablePostgresLab(mux *http.ServeMux, reason string) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":  "postgres lab not configured",
+			"reason": reason,
+		})
+	}
+	mux.HandleFunc("/api/pglab/setup", handler)
+	mux.HandleFunc("/api/pglab/seed", handler)
+	mux.HandleFunc("/api/pglab/status", handler)
+	mux.HandleFunc("/api/pglab/query", handler)
+	mux.HandleFunc("/api/pglab/explain", handler)
+	mux.HandleFunc("/api/pglab/indexes", handler)
+	mux.HandleFunc("/api/pglab/index", handler)
+	mux.HandleFunc("/api/pglab/compare", handler)
+	mux.HandleFunc("/api/pglab/recommend", handler)
 }

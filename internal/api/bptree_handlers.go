@@ -239,13 +239,15 @@ func (s *BPTreeService) handleReset(w http.ResponseWriter, r *http.Request) {
 	s.tree = bptree.New(bptree.Config{Order: body.Order})
 	post := s.tree.Snapshot()
 	metrics := computeMetrics(pre, post, nil, true)
+	preSummary := snapshotSummaryFromSnapshot(pre)
+	postSummary := snapshotSummaryFromSnapshot(post)
 	writeJSON(w, http.StatusOK, opResponse{
 		Operation: "reset",
 		Trace:     []bptree.Event{},
 		Snapshot:  post,
 		Metrics:   &metrics,
-		Pre:       &snapshotSummaryFromSnapshot(pre),
-		After:     &snapshotSummaryFromSnapshot(post),
+		Pre:       &preSummary,
+		After:     &postSummary,
 	})
 }
 
@@ -272,6 +274,8 @@ func (s *BPTreeService) handleInsert(w http.ResponseWriter, r *http.Request) {
 	post := s.tree.Snapshot()
 	events := annotateEvents(s.tree.Trace(), opID, "insert", "insert", "")
 	metrics := computeMetrics(pre, post, events, s.tree.CheckInvariants() == nil)
+	preSummary := snapshotSummaryFromSnapshot(pre)
+	postSummary := snapshotSummaryFromSnapshot(post)
 	k := body.Key
 	writeJSON(w, http.StatusOK, opResponse{
 		Operation: "insert",
@@ -280,8 +284,8 @@ func (s *BPTreeService) handleInsert(w http.ResponseWriter, r *http.Request) {
 		Trace:     events,
 		Snapshot:  post,
 		Metrics:   &metrics,
-		Pre:       &snapshotSummaryFromSnapshot(pre),
-		After:     &snapshotSummaryFromSnapshot(post),
+		Pre:       &preSummary,
+		After:     &postSummary,
 	})
 }
 
@@ -308,6 +312,8 @@ func (s *BPTreeService) handleDelete(w http.ResponseWriter, r *http.Request) {
 	post := s.tree.Snapshot()
 	events := annotateEvents(s.tree.Trace(), opID, "delete", "delete", "")
 	metrics := computeMetrics(pre, post, events, s.tree.CheckInvariants() == nil)
+	preSummary := snapshotSummaryFromSnapshot(pre)
+	postSummary := snapshotSummaryFromSnapshot(post)
 	writeJSON(w, http.StatusOK, opResponse{
 		Operation: "delete",
 		Key:       &k,
@@ -315,8 +321,8 @@ func (s *BPTreeService) handleDelete(w http.ResponseWriter, r *http.Request) {
 		Trace:     events,
 		Snapshot:  post,
 		Metrics:   &metrics,
-		Pre:       &snapshotSummaryFromSnapshot(pre),
-		After:     &snapshotSummaryFromSnapshot(post),
+		Pre:       &preSummary,
+		After:     &postSummary,
 	})
 }
 
@@ -343,6 +349,8 @@ func (s *BPTreeService) handleSearch(w http.ResponseWriter, r *http.Request) {
 	post := s.tree.Snapshot()
 	events := annotateEvents(s.tree.Trace(), opID, "search", "search", "")
 	metrics := computeMetrics(pre, post, events, s.tree.CheckInvariants() == nil)
+	preSummary := snapshotSummaryFromSnapshot(pre)
+	postSummary := snapshotSummaryFromSnapshot(post)
 	writeJSON(w, http.StatusOK, opResponse{
 		Operation: "search",
 		Key:       &k,
@@ -351,8 +359,8 @@ func (s *BPTreeService) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Trace:     events,
 		Snapshot:  post,
 		Metrics:   &metrics,
-		Pre:       &snapshotSummaryFromSnapshot(pre),
-		After:     &snapshotSummaryFromSnapshot(post),
+		Pre:       &preSummary,
+		After:     &postSummary,
 	})
 }
 
@@ -380,6 +388,8 @@ func (s *BPTreeService) handleRange(w http.ResponseWriter, r *http.Request) {
 	post := s.tree.Snapshot()
 	events := annotateEvents(s.tree.Trace(), opID, "search", "range", "")
 	metrics := computeMetrics(pre, post, events, s.tree.CheckInvariants() == nil)
+	preSummary := snapshotSummaryFromSnapshot(pre)
+	postSummary := snapshotSummaryFromSnapshot(post)
 	writeJSON(w, http.StatusOK, opResponse{
 		Operation: "range",
 		Lo:        &lo,
@@ -388,8 +398,8 @@ func (s *BPTreeService) handleRange(w http.ResponseWriter, r *http.Request) {
 		Trace:     events,
 		Snapshot:  post,
 		Metrics:   &metrics,
-		Pre:       &snapshotSummaryFromSnapshot(pre),
-		After:     &snapshotSummaryFromSnapshot(post),
+		Pre:       &preSummary,
+		After:     &postSummary,
 	})
 }
 
@@ -442,13 +452,15 @@ func (s *BPTreeService) handleBulk(w http.ResponseWriter, r *http.Request) {
 		}
 		post := s.tree.Snapshot()
 		metrics := computeMetrics(pre, post, allEvents, s.tree.CheckInvariants() == nil)
+		preSummary := snapshotSummaryFromSnapshot(pre)
+		postSummary := snapshotSummaryFromSnapshot(post)
 		writeJSON(w, http.StatusOK, opResponse{
 			Operation: "bulk",
 			Trace:     allEvents,
 			Snapshot:  post,
 			Metrics:   &metrics,
-			Pre:       &snapshotSummaryFromSnapshot(pre),
-			After:     &snapshotSummaryFromSnapshot(post),
+			Pre:       &preSummary,
+			After:     &postSummary,
 			Scenario: &scenarioRun{
 				Name:      body.Scenario,
 				Total:     len(steps),
@@ -470,13 +482,15 @@ func (s *BPTreeService) handleBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	post := s.tree.Snapshot()
 	metrics := computeMetrics(pre, post, nil, s.tree.CheckInvariants() == nil)
+	preSummary := snapshotSummaryFromSnapshot(pre)
+	postSummary := snapshotSummaryFromSnapshot(post)
 	writeJSON(w, http.StatusOK, opResponse{
 		Operation: "bulk",
 		Trace:     []bptree.Event{},
 		Snapshot:  post,
 		Metrics:   &metrics,
-		Pre:       &snapshotSummaryFromSnapshot(pre),
-		After:     &snapshotSummaryFromSnapshot(post),
+		Pre:       &preSummary,
+		After:     &postSummary,
 	})
 }
 
@@ -494,7 +508,8 @@ func (s *BPTreeService) runBulkOperation(op bulkOperation) (bulkStep, []bptree.E
 		step.Label = operation
 	}
 	pre := s.tree.Snapshot()
-	step.Pre = &snapshotSummaryFromSnapshot(pre)
+	preSummary := snapshotSummaryFromSnapshot(pre)
+	step.Pre = &preSummary
 	opID := s.nextOpID(operation)
 
 	switch operation {
@@ -532,7 +547,8 @@ func (s *BPTreeService) runBulkOperation(op bulkOperation) (bulkStep, []bptree.E
 	post := s.tree.Snapshot()
 	events := annotateEvents(s.tree.Trace(), opID, operation, op.Label, op.Notes)
 	metrics := computeMetrics(pre, post, events, s.tree.CheckInvariants() == nil)
-	step.After = &snapshotSummaryFromSnapshot(post)
+	postSummary := snapshotSummaryFromSnapshot(post)
+	step.After = &postSummary
 	step.Metrics = metrics
 	if step.ResultCount == nil {
 		step.ResultCount = nil
