@@ -102,17 +102,17 @@ func (t *Tree) findLeaf(key int) (*node, []pathEntry, []int) {
 func (t *Tree) Search(key int) (string, bool) {
 	t.resetTrace()
 	leaf, _, visited := t.findLeaf(key)
-	t.record("search_start", map[string]interface{}{"key": key})
-	t.record("path", map[string]interface{}{"pageIds": visited})
+	t.record("search_start", map[string]interface{}{"key": key, "type": "lookup"})
+	t.record("path", map[string]interface{}{"nodePath": append([]int{}, visited...), "pathLength": len(visited), "fromNode": t.root.pageID})
 	for i, k := range leaf.keys {
 		if k == key {
 			t.record("search_hit", map[string]interface{}{
-				"key": key, "value": leaf.values[i], "pageId": leaf.pageID,
+				"key": key, "value": leaf.values[i], "fromNode": leaf.pageID, "toNode": leaf.pageID,
 			})
 			return leaf.values[i], true
 		}
 	}
-	t.record("search_miss", map[string]interface{}{"key": key})
+	t.record("search_miss", map[string]interface{}{"key": key, "fromNode": leaf.pageID})
 	return "", false
 }
 
@@ -121,25 +121,33 @@ func (t *Tree) RangeSearch(lo, hi int) []KV {
 	t.resetTrace()
 	t.record("range_start", map[string]interface{}{"lo": lo, "hi": hi})
 	if lo > hi {
+		t.record("range_end", map[string]interface{}{"count": 0, "reason": "invalid_range"})
 		return nil
 	}
 	leaf, _, visited := t.findLeaf(lo)
-	t.record("path", map[string]interface{}{"pageIds": visited})
+	t.record("path", map[string]interface{}{"nodePath": append([]int{}, visited...), "pathLength": len(visited), "fromNode": t.root.pageID})
 	var out []KV
 	for leaf != nil {
-		t.record("range_visit_leaf", map[string]interface{}{"pageId": leaf.pageID, "keys": append([]int{}, leaf.keys...)})
+		t.record("range_visit_leaf", map[string]interface{}{
+			"fromNode": leaf.pageID,
+			"keys":    append([]int{}, leaf.keys...),
+			"keyCount": len(leaf.keys),
+		})
 		for i, k := range leaf.keys {
 			if k < lo {
 				continue
 			}
 			if k > hi {
-				t.record("range_end", map[string]interface{}{"count": len(out)})
+				t.record("range_end", map[string]interface{}{"count": len(out), "reason": "upper_bound_reached"})
 				return out
 			}
 			out = append(out, KV{Key: k, Value: leaf.values[i]})
 		}
 		if leaf.next != nil {
-			t.record("leaf_link_follow", map[string]interface{}{"from": leaf.pageID, "to": leaf.next.pageID})
+			t.record("leaf_link_follow", map[string]interface{}{
+				"fromNode": leaf.pageID,
+				"toNode":   leaf.next.pageID,
+			})
 		}
 		leaf = leaf.next
 		if leaf != nil {

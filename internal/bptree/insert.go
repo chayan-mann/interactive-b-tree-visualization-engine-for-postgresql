@@ -6,13 +6,19 @@ func (t *Tree) Insert(key int, value string) {
 	t.record("insert_start", map[string]interface{}{"key": key, "value": value})
 
 	leaf, path, visited := t.findLeaf(key)
-	t.record("path", map[string]interface{}{"pageIds": visited})
+	t.record("path", map[string]interface{}{"nodePath": append([]int{}, visited...), "pathLength": len(visited), "fromNode": t.root.pageID})
 
 	for i, k := range leaf.keys {
 		if k == key {
 			leaf.values[i] = value
 			t.diskWrites++
-			t.record("insert_update", map[string]interface{}{"key": key, "pageId": leaf.pageID})
+			t.record("insert_update", map[string]interface{}{
+				"key":      key,
+				"fromNode": leaf.pageID,
+				"updatedAt": i,
+				"pageId":   leaf.pageID,
+				"nodeKeys": append([]int{}, leaf.keys...),
+			})
 			return
 		}
 	}
@@ -26,7 +32,11 @@ func (t *Tree) Insert(key int, value string) {
 	t.size++
 	t.diskWrites++
 	t.record("insert_into_leaf", map[string]interface{}{
-		"key": key, "pageId": leaf.pageID, "keys": append([]int{}, leaf.keys...),
+		"key":      key,
+		"fromNode": leaf.pageID,
+		"insertedAt":  pos,
+		"nodeKeys": append([]int{}, leaf.keys...),
+		"nodeSize": len(leaf.keys),
 	})
 
 	if len(leaf.keys) > t.maxKeys {
@@ -46,11 +56,12 @@ func (t *Tree) splitLeaf(leaf *node, path []pathEntry) {
 	promote := right.keys[0]
 	t.diskWrites += 2
 	t.record("split_leaf", map[string]interface{}{
-		"leftPageId":  leaf.pageID,
-		"rightPageId": right.pageID,
-		"leftKeys":    append([]int{}, leaf.keys...),
-		"rightKeys":   append([]int{}, right.keys...),
-		"promote":     promote,
+		"fromNode":        leaf.pageID,
+		"toNode":          right.pageID,
+		"separator":       promote,
+		"leftKeys":        append([]int{}, leaf.keys...),
+		"rightKeys":       append([]int{}, right.keys...),
+		"rebalanceResult": "leaf_split",
 	})
 	t.insertIntoParent(leaf, right, promote, path)
 }
@@ -63,7 +74,9 @@ func (t *Tree) insertIntoParent(left, right *node, promote int, path []pathEntry
 		t.root = newRoot
 		t.diskWrites++
 		t.record("new_root", map[string]interface{}{
-			"pageId": newRoot.pageID, "keys": []int{promote},
+			"fromNode": newRoot.pageID,
+			"toNode":   newRoot.pageID,
+			"nodeKeys": []int{promote},
 		})
 		return
 	}
@@ -76,9 +89,10 @@ func (t *Tree) insertIntoParent(left, right *node, promote int, path []pathEntry
 	parent.children = insertNodeAt(parent.children, pos+1, right)
 	t.diskWrites++
 	t.record("promote_key", map[string]interface{}{
-		"parentPageId": parent.pageID,
-		"key":          promote,
-		"parentKeys":   append([]int{}, parent.keys...),
+		"fromNode":        parent.pageID,
+		"separator":       promote,
+		"parentKeys":      append([]int{}, parent.keys...),
+		"rebalanceResult": "key_promoted",
 	})
 	if len(parent.keys) > t.maxKeys {
 		t.splitInternal(parent, path[:len(path)-1])
@@ -95,11 +109,12 @@ func (t *Tree) splitInternal(n *node, path []pathEntry) {
 	n.children = n.children[:mid+1]
 	t.diskWrites += 2
 	t.record("split_internal", map[string]interface{}{
-		"leftPageId":  n.pageID,
-		"rightPageId": right.pageID,
-		"leftKeys":    append([]int{}, n.keys...),
-		"rightKeys":   append([]int{}, right.keys...),
-		"promote":     promote,
+		"fromNode":        n.pageID,
+		"toNode":          right.pageID,
+		"separator":       promote,
+		"leftKeys":        append([]int{}, n.keys...),
+		"rightKeys":       append([]int{}, right.keys...),
+		"rebalanceResult": "internal_split",
 	})
 	t.insertIntoParent(n, right, promote, path)
 }

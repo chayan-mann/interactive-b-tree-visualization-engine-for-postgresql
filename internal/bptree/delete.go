@@ -7,7 +7,7 @@ func (t *Tree) Delete(key int) bool {
 	t.record("delete_start", map[string]interface{}{"key": key})
 
 	leaf, path, visited := t.findLeaf(key)
-	t.record("path", map[string]interface{}{"pageIds": visited})
+	t.record("path", map[string]interface{}{"nodePath": append([]int{}, visited...), "pathLength": len(visited), "fromNode": t.root.pageID})
 
 	idx := -1
 	for i, k := range leaf.keys {
@@ -17,7 +17,7 @@ func (t *Tree) Delete(key int) bool {
 		}
 	}
 	if idx == -1 {
-		t.record("delete_miss", map[string]interface{}{"key": key})
+		t.record("delete_miss", map[string]interface{}{"key": key, "fromNode": leaf.pageID})
 		return false
 	}
 
@@ -26,7 +26,10 @@ func (t *Tree) Delete(key int) bool {
 	t.size--
 	t.diskWrites++
 	t.record("delete_from_leaf", map[string]interface{}{
-		"key": key, "pageId": leaf.pageID, "keys": append([]int{}, leaf.keys...),
+		"key":      key,
+		"fromNode": leaf.pageID,
+		"nodeKeys": append([]int{}, leaf.keys...),
+		"nodeSize": len(leaf.keys),
 	})
 
 	if leaf == t.root {
@@ -56,11 +59,21 @@ func (t *Tree) rebalanceLeaf(leaf *node, path []pathEntry) {
 			parent.keys[idx-1] = leaf.keys[0]
 			t.diskWrites += 3
 			t.record("borrow_from_left_leaf", map[string]interface{}{
-				"leafPageId":  leaf.pageID,
-				"leftPageId":  left.pageID,
-				"borrowedKey": bKey,
-				"separator":   parent.keys[idx-1],
+				"fromNode":         left.pageID,
+				"toNode":           leaf.pageID,
+				"borrowedKey":      bKey,
+				"borrowedValue":    bVal,
+				"separator":        parent.keys[idx-1],
+				"rebalanceResult":  "borrow_left_done",
+				"nodeKeys":         append([]int{}, leaf.keys...),
 			})
+			t.record("borrow_from_left_leaf_done", map[string]interface{}{
+			"fromNode":   leaf.pageID,
+			"toNode":     left.pageID,
+			"separator":  parent.keys[idx-1],
+			"nodeKeys":   append([]int{}, leaf.keys...),
+			"result":     "borrowed_from_left",
+		})
 			return
 		}
 	}
@@ -77,11 +90,21 @@ func (t *Tree) rebalanceLeaf(leaf *node, path []pathEntry) {
 			parent.keys[idx] = right.keys[0]
 			t.diskWrites += 3
 			t.record("borrow_from_right_leaf", map[string]interface{}{
-				"leafPageId":  leaf.pageID,
-				"rightPageId": right.pageID,
-				"borrowedKey": bKey,
-				"separator":   parent.keys[idx],
+				"fromNode":         right.pageID,
+				"toNode":           leaf.pageID,
+				"borrowedKey":      bKey,
+				"borrowedValue":    bVal,
+				"separator":        parent.keys[idx],
+				"rebalanceResult":  "borrow_right_done",
+				"nodeKeys":         append([]int{}, leaf.keys...),
 			})
+			t.record("borrow_from_right_leaf_done", map[string]interface{}{
+			"fromNode":  leaf.pageID,
+			"toNode":    right.pageID,
+			"separator": parent.keys[idx],
+			"nodeKeys":  append([]int{}, leaf.keys...),
+			"result":    "borrowed_from_right",
+		})
 			return
 		}
 	}
@@ -95,9 +118,11 @@ func (t *Tree) rebalanceLeaf(leaf *node, path []pathEntry) {
 		parent.children = removeNodeAt(parent.children, idx)
 		t.diskWrites += 2
 		t.record("merge_leaf", map[string]interface{}{
-			"keepPageId":   left.pageID,
-			"removePageId": leaf.pageID,
-			"keys":         append([]int{}, left.keys...),
+			"fromNode":         left.pageID,
+			"toNode":           leaf.pageID,
+			"removedNode":       leaf.pageID,
+			"rebalanceResult":  "merge_left",
+			"nodeKeys":         append([]int{}, left.keys...),
 		})
 	} else {
 		right := parent.children[idx+1]
@@ -108,9 +133,11 @@ func (t *Tree) rebalanceLeaf(leaf *node, path []pathEntry) {
 		parent.children = removeNodeAt(parent.children, idx+1)
 		t.diskWrites += 2
 		t.record("merge_leaf", map[string]interface{}{
-			"keepPageId":   leaf.pageID,
-			"removePageId": right.pageID,
-			"keys":         append([]int{}, leaf.keys...),
+			"fromNode":         leaf.pageID,
+			"toNode":           right.pageID,
+			"removedNode":       right.pageID,
+			"rebalanceResult":  "merge_right",
+			"nodeKeys":         append([]int{}, leaf.keys...),
 		})
 	}
 
@@ -122,7 +149,9 @@ func (t *Tree) handleParentAfterMerge(parent *node, path []pathEntry) {
 		if len(parent.keys) == 0 {
 			t.root = parent.children[0]
 			t.record("root_contract", map[string]interface{}{
-				"newRootPageId": t.root.pageID,
+				"fromNode":         parent.pageID,
+				"toNode":           t.root.pageID,
+				"rebalanceResult":  "root_contract",
 			})
 		}
 		return
@@ -150,10 +179,11 @@ func (t *Tree) rebalanceInternal(n *node, path []pathEntry) {
 			parent.keys[idx-1] = bKey
 			t.diskWrites += 3
 			t.record("borrow_from_left_internal", map[string]interface{}{
-				"nodePageId":   n.pageID,
-				"leftPageId":   left.pageID,
-				"newSeparator": bKey,
-				"rotatedKey":   sep,
+				"fromNode":        left.pageID,
+				"toNode":          n.pageID,
+				"separator":       bKey,
+				"rotatedKey":      sep,
+				"rebalanceResult": "borrow_internal_left",
 			})
 			return
 		}
@@ -172,10 +202,11 @@ func (t *Tree) rebalanceInternal(n *node, path []pathEntry) {
 			parent.keys[idx] = bKey
 			t.diskWrites += 3
 			t.record("borrow_from_right_internal", map[string]interface{}{
-				"nodePageId":   n.pageID,
-				"rightPageId":  right.pageID,
-				"newSeparator": bKey,
-				"rotatedKey":   sep,
+				"fromNode":        right.pageID,
+				"toNode":          n.pageID,
+				"separator":       bKey,
+				"rotatedKey":      sep,
+				"rebalanceResult": "borrow_internal_right",
 			})
 			return
 		}
@@ -191,9 +222,11 @@ func (t *Tree) rebalanceInternal(n *node, path []pathEntry) {
 		parent.children = removeNodeAt(parent.children, idx)
 		t.diskWrites += 2
 		t.record("merge_internal", map[string]interface{}{
-			"keepPageId":   left.pageID,
-			"removePageId": n.pageID,
-			"keys":         append([]int{}, left.keys...),
+			"fromNode":        left.pageID,
+			"toNode":          n.pageID,
+			"separator":       sep,
+			"rebalanceResult": "merge_internal_left",
+			"nodeKeys":        append([]int{}, left.keys...),
 		})
 	} else {
 		right := parent.children[idx+1]
@@ -205,9 +238,11 @@ func (t *Tree) rebalanceInternal(n *node, path []pathEntry) {
 		parent.children = removeNodeAt(parent.children, idx+1)
 		t.diskWrites += 2
 		t.record("merge_internal", map[string]interface{}{
-			"keepPageId":   n.pageID,
-			"removePageId": right.pageID,
-			"keys":         append([]int{}, n.keys...),
+			"fromNode":        n.pageID,
+			"toNode":          right.pageID,
+			"separator":       sep,
+			"rebalanceResult": "merge_internal_right",
+			"nodeKeys":        append([]int{}, n.keys...),
 		})
 	}
 
