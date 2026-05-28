@@ -3,9 +3,10 @@ import type { NodeView, Snapshot } from '../types';
 interface Props {
   snapshot: Snapshot;
   highlight: Set<number>;
+  focusMode?: boolean;
 }
 
-export function LeafChain({ snapshot, highlight }: Props) {
+export function LeafChain({ snapshot, highlight, focusMode = false }: Props) {
   if (!snapshot || !snapshot.leafChain.length) return null;
   const byId = new Map<number, NodeView>();
   snapshot.nodes.forEach((n) => byId.set(n.pageId, n));
@@ -21,6 +22,7 @@ export function LeafChain({ snapshot, highlight }: Props) {
               borderRadius: 6,
               background: '#2c3a5c',
               border: `1.5px solid ${highlight.has(leaf.pageId) ? '#6ea8ff' : '#4a5b7a'}`,
+              opacity: focusMode && !highlight.has(leaf.pageId) ? 0.35 : 1,
               fontFamily: 'JetBrains Mono, monospace',
               fontSize: 12,
               minWidth: 50,

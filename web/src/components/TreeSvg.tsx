@@ -4,6 +4,7 @@ interface Props {
   snapshot: Snapshot;
   highlight: Set<number>;
   flash: Set<number>;
+  focusMode?: boolean;
 }
 
 interface Positioned extends NodeView {
@@ -23,7 +24,7 @@ function measure(node: NodeView): number {
   return Math.max(MIN_NODE_WIDTH, slots * SLOT_WIDTH + 8);
 }
 
-export function TreeSvg({ snapshot, highlight, flash }: Props) {
+export function TreeSvg({ snapshot, highlight, flash, focusMode = false }: Props) {
   if (!snapshot || !snapshot.nodes.length) {
     return <div className="muted">empty tree</div>;
   }
@@ -141,30 +142,33 @@ export function TreeSvg({ snapshot, highlight, flash }: Props) {
           />
         ))}
         {Array.from(positioned.values()).map((n) => {
-          const isHighlight = highlight.has(n.pageId);
-          const isFlash = flash.has(n.pageId);
-          const fill = n.isLeaf ? '#2c3a5c' : '#2c3a3a';
-          const stroke = isFlash ? '#f0b86e' : isHighlight ? '#6ea8ff' : '#4a5b7a';
-          const strokeWidth = isFlash || isHighlight ? 2.5 : 1.2;
-          return (
-            <g key={n.pageId} transform={`translate(${n.x - minX + padX}, ${n.y + padY})`}>
-              <rect
-                width={n.width}
-                height={NODE_HEIGHT}
-                rx={6}
-                ry={6}
-                fill={fill}
-                stroke={stroke}
-                strokeWidth={strokeWidth}
-              />
-              <text
-                x={n.width / 2}
-                y={NODE_HEIGHT / 2 + 4}
-                textAnchor="middle"
-                fontFamily="JetBrains Mono, monospace"
-                fontSize={12}
-                fill="#e4e8f1"
-              >
+        const isHighlight = highlight.has(n.pageId);
+        const isFlash = flash.has(n.pageId);
+        const isDimmed = focusMode && !isHighlight && !isFlash;
+        const fill = n.isLeaf ? '#2c3a5c' : '#2c3a3a';
+        const stroke = isFlash ? '#f0b86e' : isHighlight ? '#6ea8ff' : '#4a5b7a';
+        const strokeWidth = isFlash || isHighlight ? 2.5 : 1.2;
+        return (
+          <g key={n.pageId} transform={`translate(${n.x - minX + padX}, ${n.y + padY})`}>
+            <rect
+              width={n.width}
+              height={NODE_HEIGHT}
+              rx={6}
+              ry={6}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              opacity={isDimmed ? 0.33 : 1}
+            />
+            <text
+              x={n.width / 2}
+              y={NODE_HEIGHT / 2 + 4}
+              textAnchor="middle"
+              fontFamily="JetBrains Mono, monospace"
+              fontSize={12}
+              fill="#e4e8f1"
+              opacity={isDimmed ? 0.5 : 1}
+            >
                 {n.keys.length ? n.keys.join(' • ') : '∅'}
               </text>
               <text
